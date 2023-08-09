@@ -18,6 +18,7 @@ mod options_and_futures {
         OnlyOwnerFunction,
         UnregisteredVoter,
         VoterAlreadyVoted,
+        VoterEqualToCandidate,
     }
 
     #[derive(scale::Decode, scale::Encode)]
@@ -26,8 +27,9 @@ mod options_and_futures {
         derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout)
     )]
     pub struct Voter {
-        voted: bool,
-        reputation: Reputation
+        reputation: Reputation,
+        address: AccountId,
+        available_votes: u128
     }
 
     /// Defines the storage of your contract.
@@ -60,14 +62,14 @@ mod options_and_futures {
         /// This one flips the value of the stored `bool` from `true`
         /// to `false` and vice versa.
         #[ink(message)]
-        pub fn add_voter(&mut self, voter: AccountId) -> Result<(), Error> {
+        pub fn add_voter(&mut self, voter: AccountId, available_votes: u128) -> Result<(), Error> {
             
             if self.env().caller() != self.owner {
                 return Err(Error::OnlyOwnerFunction)
             }
 
             self.voters_addresses.push(voter);
-            self.voters.insert(voter, &Voter{voted: false, reputation: 0});
+            self.voters.insert(voter, &Voter{reputation: 0, address: voter, available_votes});
             
             Ok(())
         }
@@ -77,17 +79,32 @@ mod options_and_futures {
         pub fn vote(&mut self, candidate_address: AccountId, votes: i128) -> Result<(), Error> {
             let mut voter: Voter = self.voters.get(&self.env().caller()).ok_or(Error::UnregisteredVoter)?;
             
-            if voter.voted {
+            if voter.available_votes < (votes.abs() as u128){
                 return Err(Error::VoterAlreadyVoted);
             }
+
+            if candidate_address == voter.address {
+                return Err(Error::VoterEqualToCandidate);
+            }
+            
             let mut candidate: Voter = self.voters.get(candidate_address).ok_or(Error::UnregisteredVoter)?;
 
             candidate.reputation += votes;
-            voter.voted = true;
+            voter.available_votes -= votes.abs() as u128;
 
             self.voters.insert(candidate_address, &candidate);
             self.voters.insert(&self.env().caller(), &voter);
 
+            Ok(())
+        }
+
+        #[ink(message)]
+        pub fn remove_voter(&mut self, voter_address: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::OnlyOwnerFunction);
+            }
+            let mut voter: Voter = self.voters.get(&voter_address).ok_or(Error::UnregisteredVoter)?;
+            self.voters.remove(voter_address);
             Ok(())
         }
 
@@ -98,8 +115,7 @@ mod options_and_futures {
                 voters.push(self.voters.get(voter).ok_or(Error::UnregisteredVoter)?);
             }
             Ok(voters)
-        }
-        
+        }        
     }
 }
 
